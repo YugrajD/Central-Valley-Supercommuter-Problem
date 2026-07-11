@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Node / Next.js
+node_modules/
+web/.next/
+web/out/
+
+# Data (downloaded/generated, not committed — pipeline recreates it)
+data/
+cache/
+*.osm.pbf
+*.gtfs.zip
+
+# Local tooling
+jdk/
+.env
+.env.local
+
+# OS / editor
+.DS_Store
+Thumbs.db

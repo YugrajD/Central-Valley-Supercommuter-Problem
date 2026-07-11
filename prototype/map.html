@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ALTAMONT — Map Prototype</title>
+  <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <style>
+    :root {
+      --bg: #0d1017;
+      --panel: rgba(17, 22, 32, 0.92);
+      --line: #2a3446;
+      --ink: #e8edf5;
+      --muted: #8a97ab;
+      --accent: #34d399;   /* population / SJ residents */
+      --jobs: #60a5fa;     /* Bay Area jobs */
+      --rail: #f59e0b;     /* ACE corridor */
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    #map { position: absolute; inset: 0; }
+
+    .panel {
+      position: absolute; z-index: 2;
+      background: var(--panel);
+      color: var(--ink);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      backdrop-filter: blur(8px);
+      box-shadow: 0 8px 30px rgba(0,0,0,.35);
+    }
+    #title { top: 16px; left: 16px; padding: 14px 16px; max-width: 320px; }
+    #title h1 { margin: 0; font-size: 18px; letter-spacing: .04em; }
+    #title p { margin: 6px 0 0; font-size: 12.5px; line-height: 1.45; color: var(--muted); }
+
+    #legend { bottom: 16px; left: 16px; padding: 12px 14px; font-size: 12.5px; }
+    #legend .row { display: flex; align-items: center; gap: 9px; margin: 6px 0; }
+    #legend .dot { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+    #legend .swatch-line { width: 16px; height: 3px; border-radius: 2px; flex: none; }
+    #legend .hint { color: var(--muted); margin-top: 8px; font-size: 11.5px; }
+
+    #controls { top: 16px; right: 16px; padding: 8px; display: flex; gap: 6px; }
+    #controls button {
+      background: #1a2130; color: var(--ink); border: 1px solid var(--line);
+      border-radius: 8px; padding: 7px 11px; font-size: 12px; cursor: pointer;
+    }
+    #controls button.active { background: #263145; border-color: #3a4a66; }
+
+    .maplibregl-popup-content {
+      background: var(--panel); color: var(--ink);
+      border: 1px solid var(--line); border-radius: 10px;
+      font-size: 12.5px; padding: 10px 12px;
+    }
+    .maplibregl-popup-content strong { font-size: 13px; }
+    .maplibregl-popup-tip { border-top-color: var(--panel) !important; border-bottom-color: var(--panel) !important; }
+    .pk { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <div id="title" class="panel">
+    <h1>ALTAMONT</h1>
+    <p>San Joaquin County → Bay Area job access. Circles show where residents live
+       (green) and where jobs are (blue). The amber line is the ACE rail corridor.
+       <span style="color:#f59e0b">Placeholder data</span> — real LODES/ACS wiring is Phase 1.</p>
+  </div>
+
+  <div id="controls" class="panel">
+    <button id="btn-light">Light</button>
+    <button id="btn-dark" class="active">Dark</button>
+  </div>
+
+  <div id="legend" class="panel">
+    <div class="row"><span class="dot" style="background:var(--accent)"></span> Residents (SJ County)</div>
+    <div class="row"><span class="dot" style="background:var(--jobs)"></span> Jobs (Bay Area)</div>
+    <div class="row"><span class="swatch-line" style="background:var(--rail)"></span> ACE rail corridor</div>
+    <div class="hint">Circle area ∝ population / jobs · hover for detail</div>
+  </div>
+
+  <script>
+    // ---- Placeholder data (swap for LODES/ACS in Phase 1) -------------------
+    const residents = {
+      type: 'FeatureCollection',
+      features: [
+        ['Stockton', -121.2908, 37.9577, 320000],
+        ['Tracy',    -121.4252, 37.7397,  93000],
+        ['Manteca',  -121.2161, 37.7974,  83000],
+        ['Lodi',     -121.2722, 38.1341,  66000],
+        ['Lathrop',  -121.2766, 37.8227,  30000],
+        ['Ripon',    -121.1241, 37.7419,  16000],
+        ['Escalon',  -120.9974, 37.7974,   7000],
+      ].map(([name, lon, lat, pop]) => ({
+        type: 'Feature',
+        properties: { name, value: pop, kind: 'Residents' },
+        geometry: { type: 'Point', coordinates: [lon, lat] },
+      })),
+    };
+
+    const jobs = {
+      type: 'FeatureCollection',
+      features: [
+        ['San Francisco', -122.4194, 37.7749, 700000],
+        ['San Jose',      -121.8863, 37.3382, 500000],
+        ['Fremont',       -121.9886, 37.5485, 100000],
+        ['Pleasanton',    -121.8747, 37.6624,  90000],
+        ['Livermore',     -121.7680, 37.6819,  60000],
+        ['Dublin',        -121.9358, 37.7022,  40000],
+      ].map(([name, lon, lat, j]) => ({
+        type: 'Feature',
+        properties: { name, value: j, kind: 'Jobs' },
+        geometry: { type: 'Point', coordinates: [lon, lat] },
+      })),
+    };
+
+    // ACE corridor (approximate station path, Stockton → San Jose Diridon)
+    const aceStops = [
+      ['Stockton',        -121.2900, 37.9516],
+      ['Lathrop/Manteca', -121.2760, 37.7930],
+      ['Tracy',           -121.4360, 37.6935],
+      ['Vasco Road',      -121.6960, 37.7160],
+      ['Livermore',       -121.7620, 37.6910],
+      ['Pleasanton',      -121.9080, 37.6980],
+      ['Fremont',         -121.9290, 37.5090],
+      ['Great America',   -121.9750, 37.4090],
+      ['Santa Clara',     -121.9360, 37.3530],
+      ['San Jose',        -121.9020, 37.3297],
+    ];
+    const aceLine = {
+      type: 'Feature', properties: {},
+      geometry: { type: 'LineString', coordinates: aceStops.map(s => [s[1], s[2]]) },
+    };
+    const aceStations = {
+      type: 'FeatureCollection',
+      features: aceStops.map(([name, lon, lat]) => ({
+        type: 'Feature', properties: { name, kind: 'ACE station' },
+        geometry: { type: 'Point', coordinates: [lon, lat] },
+      })),
+    };
+
+    // ---- Map ---------------------------------------------------------------
+    const STYLES = {
+      dark:  'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+      light: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
+    };
+
+    const map = new maplibregl.Map({
+      container: 'map',
+      style: STYLES.dark,
+      center: [-121.62, 37.72],
+      zoom: 8.4,
+      attributionControl: { compact: true },
+    });
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
+
+    function addDataLayers() {
+      map.addSource('residents', { type: 'geojson', data: residents });
+      map.addSource('jobs', { type: 'geojson', data: jobs });
+      map.addSource('ace-line', { type: 'geojson', data: aceLine });
+      map.addSource('ace-stations', { type: 'geojson', data: aceStations });
+
+      // ACE corridor line
+      map.addLayer({
+        id: 'ace-line', type: 'line', source: 'ace-line',
+        paint: {
+          'line-color': '#f59e0b', 'line-width': 3.5, 'line-opacity': 0.85,
+          'line-blur': 0.3,
+        },
+      });
+      map.addLayer({
+        id: 'ace-stations', type: 'circle', source: 'ace-stations',
+        paint: {
+          'circle-radius': 4, 'circle-color': '#0d1017',
+          'circle-stroke-color': '#f59e0b', 'circle-stroke-width': 2,
+        },
+      });
+
+      // radius: area ∝ value → radius ∝ sqrt(value)
+      const radius = (max) => ([
+        'interpolate', ['linear'], ['sqrt', ['get', 'value']],
+        0, 4, Math.sqrt(max), 46,
+      ]);
+
+      map.addLayer({
+        id: 'residents', type: 'circle', source: 'residents',
+        paint: {
+          'circle-radius': radius(320000),
+          'circle-color': '#34d399', 'circle-opacity': 0.28,
+          'circle-stroke-color': '#34d399', 'circle-stroke-width': 1.4,
+        },
+      });
+      map.addLayer({
+        id: 'jobs', type: 'circle', source: 'jobs',
+        paint: {
+          'circle-radius': radius(700000),
+          'circle-color': '#60a5fa', 'circle-opacity': 0.24,
+          'circle-stroke-color': '#60a5fa', 'circle-stroke-width': 1.4,
+        },
+      });
+
+      // labels
+      map.addLayer({
+        id: 'labels', type: 'symbol',
+        source: 'residents',
+        layout: {
+          'text-field': ['get', 'name'], 'text-size': 11,
+          'text-offset': [0, 1.4], 'text-anchor': 'top',
+        },
+        paint: { 'text-color': '#e8edf5', 'text-halo-color': '#0d1017', 'text-halo-width': 1.2 },
+      });
+
+      // popups
+      const popup = new maplibregl.Popup({ closeButton: false, offset: 10 });
+      for (const id of ['residents', 'jobs', 'ace-stations']) {
+        map.on('mouseenter', id, (e) => {
+          map.getCanvas().style.cursor = 'pointer';
+          const p = e.features[0].properties;
+          const val = p.value ? `<br><span class="pk">${p.kind}:</span> ${Number(p.value).toLocaleString()}` : '';
+          popup.setLngLat(e.lngLat).setHTML(`<strong>${p.name}</strong>${val || `<br><span class="pk">${p.kind}</span>`}`).addTo(map);
+        });
+        map.on('mouseleave', id, () => { map.getCanvas().style.cursor = ''; popup.remove(); });
+      }
+    }
+
+    map.on('load', addDataLayers);
+
+    // theme toggle
+    const btnLight = document.getElementById('btn-light');
+    const btnDark = document.getElementById('btn-dark');
+    function setTheme(theme) {
+      map.setStyle(STYLES[theme]);
+      map.once('styledata', addDataLayers);
+      btnLight.classList.toggle('active', theme === 'light');
+      btnDark.classList.toggle('active', theme === 'dark');
+      document.documentElement.style.setProperty('--bg', theme === 'light' ? '#f5f6f8' : '#0d1017');
+    }
+    btnLight.onclick = () => setTheme('light');
+    btnDark.onclick = () => setTheme('dark');
+  </script>
+</body>
+</html>
