@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { aceLine, aceStations } from "@/data/placeholder";
-import { METRICS, SEQ_RAMP, type MetricKey } from "@/lib/metrics";
+import { DIV_MID_DARK, DIV_NEG, DIV_POS, METRICS, SEQ_RAMP, type MetricKey } from "@/lib/metrics";
 
 const STYLES = {
   dark: "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
@@ -17,6 +17,8 @@ export interface MapProps {
   theme?: Theme;
   metric: MetricKey;
   tracts: GeoJSON.FeatureCollection | null;
+  /** when set, paint the diverging delta choropleth instead of the metric */
+  diff?: GeoJSON.FeatureCollection | null;
 }
 
 /** 5th–95th percentile span of a metric across tracts (robust to outliers). */
@@ -44,6 +46,44 @@ function fillColor(span: [number, number], metric: MetricKey): maplibregl.Expres
     ["interpolate", ["linear"], ["get", metric], ...stops],
     "rgba(120,130,145,0.25)", // no data
   ] as unknown as maplibregl.ExpressionSpecification;
+}
+
+/** Diverging paint for delta: red (loss) ↔ neutral ↔ blue (gain), symmetric span. */
+function diffColor(diff: GeoJSON.FeatureCollection): maplibregl.ExpressionSpecification {
+  const deltas = diff.features
+    .map((f) => f.properties?.delta)
+    .filter((v): v is number => typeof v === "number" && isFinite(v));
+  const maxAbs = Math.max(1, ...deltas.map(Math.abs));
+  return [
+    "case",
+    ["==", ["typeof", ["get", "delta"]], "number"],
+    [
+      "interpolate",
+      ["linear"],
+      ["get", "delta"],
+      -maxAbs, DIV_NEG,
+      0, DIV_MID_DARK,
+      maxAbs, DIV_POS,
+    ],
+    "rgba(120,130,145,0.25)",
+  ] as unknown as maplibregl.ExpressionSpecification;
+}
+
+function activeData(
+  tracts: GeoJSON.FeatureCollection | null,
+  diff: GeoJSON.FeatureCollection | null | undefined,
+): GeoJSON.FeatureCollection | null {
+  return diff ?? tracts;
+}
+
+function activePaint(
+  tracts: GeoJSON.FeatureCollection | null,
+  diff: GeoJSON.FeatureCollection | null | undefined,
+  metric: MetricKey,
+): maplibregl.ExpressionSpecification | null {
+  if (diff) return diffColor(diff);
+  if (tracts) return fillColor(metricSpan(tracts, metric), metric);
+  return null;
 }
 
 function addLayers(map: maplibregl.Map, tracts: GeoJSON.FeatureCollection | null, metric: MetricKey) {
@@ -96,6 +136,14 @@ function addLayers(map: maplibregl.Map, tracts: GeoJSON.FeatureCollection | null
 }
 
 function popupHtml(p: Record<string, unknown>, metric: MetricKey): string {
+  if (typeof p.delta === "number") {
+    const sign = p.delta >= 0 ? "+" : "";
+    return `<strong>${p.name ?? p.geoid}</strong>
+      <div style="margin:4px 0"><span style="color:#8a97ab">Jobs gained:</span>
+      <strong>${sign}${Number(p.delta).toLocaleString()}</strong></div>
+      <div><span style="color:#8a97ab">before:</span> ${Number(p.baseline ?? 0).toLocaleString()}
+      → <span style="color:#8a97ab">after:</span> ${Number(p.scenario ?? 0).toLocaleString()}</div>`;
+  }
   const def = METRICS.find((m) => m.key === metric)!;
   const v = p[metric];
   const main =
@@ -112,7 +160,7 @@ function popupHtml(p: Record<string, unknown>, metric: MetricKey): string {
     ${extra}`;
 }
 
-export default function Map({ theme = "dark", metric, tracts }: MapProps) {
+export default function Map({ theme = "dark", metric, tracts, diff }: MapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const loadedRef = useRef(false);
@@ -144,23 +192,36 @@ export default function Map({ theme = "dark", metric, tracts }: MapProps) {
     const map = mapRef.current;
     if (!map || !loadedRef.current) return;
     map.setStyle(STYLES[theme]);
-    map.once("styledata", () => addLayers(map, tracts, metric));
+    map.once("styledata", () => {
+      addLayers(map, tracts, metric);
+      const data = activeData(tracts, diff);
+      const paint = activePaint(tracts, diff, metric);
+      const source = map.getSource("tracts") as maplibregl.GeoJSONSource | undefined;
+      if (source && data) source.setData(data);
+      if (paint && map.getLayer("tracts-fill")) {
+        map.setPaintProperty("tracts-fill", "fill-color", paint);
+      }
+    });
   }, [theme]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // add layers when data arrives / map ready; update paint on metric change
+  // add layers when data arrives / map ready; swap data + paint on metric/diff change
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
 
     const apply = () => {
       addLayers(map, tracts, metric);
-      if (tracts && map.getLayer("tracts-fill")) {
-        map.setPaintProperty("tracts-fill", "fill-color", fillColor(metricSpan(tracts, metric), metric));
+      const data = activeData(tracts, diff);
+      const paint = activePaint(tracts, diff, metric);
+      const source = map.getSource("tracts") as maplibregl.GeoJSONSource | undefined;
+      if (source && data) source.setData(data);
+      if (paint && map.getLayer("tracts-fill")) {
+        map.setPaintProperty("tracts-fill", "fill-color", paint);
       }
     };
     if (loadedRef.current && map.isStyleLoaded()) apply();
     else map.once("load", apply);
-  }, [tracts, metric]);
+  }, [tracts, metric, diff]);
 
   // hover popup + highlight
   useEffect(() => {
