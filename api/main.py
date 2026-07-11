@@ -28,5 +28,7 @@ def health() -> dict:
 
 
 from api.routes.baseline import router as baseline_router  # noqa: E402
+from api.routes.scenarios import router as scenarios_router  # noqa: E402
 
 app.include_router(baseline_router)
+app.include_router(scenarios_router)
