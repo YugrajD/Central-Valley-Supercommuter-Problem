@@ -2,14 +2,22 @@
 
 import type { DiffHeadline } from "@/lib/api";
 
+export interface WeightedGainer {
+  geoid: string;
+  delta: number;
+  weighted: number;
+}
+
 export default function DiffPanel({
   headline,
   scenarioName,
   cutoffMin,
+  weightedGainers,
 }: {
   headline: DiffHeadline;
   scenarioName: string;
   cutoffMin: number;
+  weightedGainers?: WeightedGainer[] | null;
 }) {
   const sign = headline.total_delta >= 0 ? "+" : "";
   return (
@@ -40,10 +48,12 @@ export default function DiffPanel({
           </>
         )}
       </div>
-      {headline.top_gainers.length > 0 && (
+      {weightedGainers ? (
         <div style={{ marginTop: 8, fontSize: 11.5 }}>
-          <div style={{ color: "var(--muted)", marginBottom: 4 }}>Biggest gains</div>
-          {headline.top_gainers.map((g) => (
+          <div style={{ color: "var(--muted)", marginBottom: 4 }}>
+            Biggest gains, weighted by need
+          </div>
+          {weightedGainers.map((g) => (
             <div
               key={g.geoid}
               style={{ display: "flex", justifyContent: "space-between", padding: "2px 0" }}
@@ -54,7 +64,29 @@ export default function DiffPanel({
               </span>
             </div>
           ))}
+          {weightedGainers.length === 0 && (
+            <div style={{ color: "var(--muted)" }}>
+              no gains land on high-need tracts under these weights
+            </div>
+          )}
         </div>
+      ) : (
+        headline.top_gainers.length > 0 && (
+          <div style={{ marginTop: 8, fontSize: 11.5 }}>
+            <div style={{ color: "var(--muted)", marginBottom: 4 }}>Biggest gains</div>
+            {headline.top_gainers.map((g) => (
+              <div
+                key={g.geoid}
+                style={{ display: "flex", justifyContent: "space-between", padding: "2px 0" }}
+              >
+                <span style={{ color: "var(--muted)" }}>tract {g.geoid.slice(-6)}</span>
+                <span style={{ fontVariantNumeric: "tabular-nums" }}>
+                  +{g.delta.toLocaleString()}
+                </span>
+              </div>
+            ))}
+          </div>
+        )
       )}
     </div>
   );

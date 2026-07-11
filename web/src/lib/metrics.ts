@@ -2,6 +2,7 @@
 // method); the diverging pair is reserved for scenario diff deltas (Stage 3).
 
 export type MetricKey =
+  | "need"
   | "jobs_60min"
   | "supercommuter_share"
   | "long_commute_share"
@@ -23,6 +24,12 @@ const usd = (v: number) => `$${Math.round(v).toLocaleString()}`;
 const num = (v: number) => Math.round(v).toLocaleString();
 
 export const METRICS: MetricDef[] = [
+  {
+    key: "need",
+    label: "Composite need",
+    format: (v: number) => v.toFixed(2),
+    description: "Weighted need index from the equity sliders (0 = least, 1 = most)",
+  },
   {
     key: "jobs_60min",
     label: "Bay jobs in 60 min",

@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import type { Theme } from "@/components/Map";
 import ScenarioPanel from "@/components/ScenarioPanel";
 import DiffPanel from "@/components/DiffPanel";
+import EquitySliders from "@/components/EquitySliders";
 import {
   fetchBaseline,
   fetchScenarioDiff,
@@ -12,6 +13,7 @@ import {
   type ScenarioDiff,
   type ScenarioInfo,
 } from "@/lib/api";
+import { DEFAULT_WEIGHTS, withNeed, type Weights } from "@/lib/equity";
 import { DIV_MID_DARK, DIV_NEG, DIV_POS, METRICS, SEQ_RAMP, type MetricKey } from "@/lib/metrics";
 
 // MapLibre touches window — client-only.
@@ -31,6 +33,9 @@ export default function Home() {
   const [scenarioError, setScenarioError] = useState<string | null>(null);
   const [diff, setDiff] = useState<ScenarioDiff | null>(null);
 
+  const [weights, setWeights] = useState<Weights>(DEFAULT_WEIGHTS);
+  const [equityOn, setEquityOn] = useState(false);
+
   useEffect(() => {
     fetchBaseline().then(setTracts).catch((e) => setError(String(e)));
     fetchScenarios().then(setScenarios).catch(() => setScenarios([]));
@@ -46,7 +51,21 @@ export default function Home() {
     setLoadingScenario(id);
     fetchScenarioDiff(id, CUTOFF_MIN)
       .then((d) => {
-        setDiff(d);
+        // diff geojson lacks equity columns; graft them from baseline by geoid
+        const equityByGeoid = new window.Map<string, Record<string, unknown>>(
+          (tracts?.features ?? []).map((f) => [String(f.properties?.geoid), f.properties ?? {}]),
+        );
+        const geojson: GeoJSON.FeatureCollection = {
+          ...d.geojson,
+          features: d.geojson.features.map((f) => ({
+            ...f,
+            properties: {
+              ...equityByGeoid.get(String(f.properties?.geoid)),
+              ...f.properties,
+            },
+          })),
+        };
+        setDiff({ ...d, geojson });
         setActiveScenario(id);
       })
       .catch((e) => setScenarioError(String(e.message ?? e)))
@@ -57,13 +76,40 @@ export default function Home() {
     () => tracts?.features.some((f) => typeof f.properties?.jobs_60min === "number") ?? false,
     [tracts],
   );
-  const available = METRICS.filter((m) => m.key !== "jobs_60min" || hasJobs);
-  const active = METRICS.find((m) => m.key === metric)!;
+
+  // equity weighting is client-side arithmetic over loaded GeoJSON — live, no API call
+  const displayTracts = useMemo(
+    () => (tracts && equityOn ? withNeed(tracts, weights) : tracts),
+    [tracts, equityOn, weights],
+  );
+  const displayDiff = useMemo(
+    () => (diff ? (equityOn ? withNeed(diff.geojson, weights) : diff.geojson) : null),
+    [diff, equityOn, weights],
+  );
+
+  const weightedGainers = useMemo(() => {
+    if (!equityOn || !displayDiff) return null;
+    return displayDiff.features
+      .map((f) => ({
+        geoid: String(f.properties?.geoid),
+        delta: Number(f.properties?.delta ?? 0),
+        weighted: Number(f.properties?.weighted_delta ?? 0),
+      }))
+      .filter((g) => g.weighted > 0)
+      .sort((a, b) => b.weighted - a.weighted)
+      .slice(0, 5);
+  }, [equityOn, displayDiff]);
+
+  const mapMetric: MetricKey = equityOn && !diff ? "need" : metric;
+  const available = METRICS.filter(
+    (m) => m.key !== "need" && (m.key !== "jobs_60min" || hasJobs),
+  );
+  const active = METRICS.find((m) => m.key === mapMetric)!;
   const activeScenarioInfo = scenarios.find((s) => s.id === activeScenario);
 
   return (
     <main>
-      <Map theme={theme} metric={metric} tracts={tracts} diff={diff?.geojson ?? null} />
+      <Map theme={theme} metric={mapMetric} tracts={displayTracts} diff={displayDiff && diff ? displayDiff : null} />
 
       <div className="panel" style={{ top: 16, left: 16, padding: "14px 16px", maxWidth: 330 }}>
         <h1 style={{ margin: 0, fontSize: 18, letterSpacing: "0.04em" }}>ALTAMONT</h1>
@@ -77,7 +123,7 @@ export default function Home() {
                 : "Loading tracts…"}
         </p>
 
-        {!diff && (
+        {!diff && !equityOn && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 10 }}>
             {available.map((m) => (
               <button
@@ -113,11 +159,19 @@ export default function Home() {
         onToggle={onToggleScenario}
       />
 
+      <EquitySliders
+        weights={weights}
+        enabled={equityOn}
+        onChange={setWeights}
+        onToggle={setEquityOn}
+      />
+
       {diff && activeScenarioInfo && (
         <DiffPanel
           headline={diff.headline}
           scenarioName={activeScenarioInfo.name}
           cutoffMin={CUTOFF_MIN}
+          weightedGainers={weightedGainers}
         />
       )}
 
@@ -143,7 +197,8 @@ export default function Home() {
           ACE rail corridor
         </div>
         <div style={{ marginTop: 8, fontSize: 10.5, color: "var(--muted)", maxWidth: 200 }}>
-          Fixed departure: weekday 6:30–7:30 AM. Transit + walk, R5 routing.
+          Fixed departure: weekday 6:30–7:30 AM. Access walk or park-and-ride;
+          egress walk. R5 routing.
         </div>
       </div>
 

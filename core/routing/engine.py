@@ -39,7 +39,14 @@ def travel_time_matrix(
     departure: dt.datetime,
     max_time_min: int = 120,
 ) -> pd.DataFrame:
-    """Transit+walk travel times, long format [from_id, to_id, travel_time] (minutes).
+    """Transit travel times, long format [from_id, to_id, travel_time] (minutes).
+
+    Access model (a core, documented assumption): the first-mile leg to the
+    boarding stop is WALK or PARK-AND-RIDE (drive to the station) — matching
+    observed ACE commuter behavior in exurban tracts whose centroids sit far
+    beyond R5's walk caps. Egress at the destination end is on foot. Without
+    CAR_PARK access, every SJ tract shows zero reachable Bay jobs at any cutoff
+    and the tool can't distinguish scenarios at all.
 
     origins/destinations: GeoDataFrames with an `id` column and point geometry
     (tract centroids). NaN travel_time = unreachable within max_time_min.
@@ -55,7 +62,8 @@ def travel_time_matrix(
         destinations=destinations,
         departure=departure,
         departure_time_window=dt.timedelta(minutes=60),  # spread over the AM peak
-        transport_modes=[TransportMode.TRANSIT, TransportMode.WALK],
+        transport_modes=[TransportMode.TRANSIT],
+        access_modes=[TransportMode.WALK, TransportMode.CAR_PARK],
         max_time=dt.timedelta(minutes=max_time_min),
     )
     return pd.DataFrame(ttm).rename(columns={"from_id": "from_id", "to_id": "to_id"})
