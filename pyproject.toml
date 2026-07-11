@@ -19,6 +19,7 @@ pipeline = [
     "pyarrow>=16",
     "requests>=2.32",
     "shapely>=2.0",
+    "osmium>=3.7",
 ]
 routing = [
     "r5py>=1.0",
