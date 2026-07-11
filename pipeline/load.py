@@ -40,7 +40,7 @@ def load_lodes(repo: Repository) -> str:
     repo.save_table("od_flows", od)
     return (
         f"bay_jobs: {len(jobs)} work tracts ({jobs['jobs'].sum():,} jobs), "
-        f"od_flows: {len(od)} SJ→Bay tract pairs ({od['jobs'].sum():,} commuters)"
+        f"od_flows: {len(od)} SJ->Bay tract pairs ({od['jobs'].sum():,} commuters)"
     )
 
 
@@ -51,7 +51,7 @@ def load_gtfs(repo: Repository) -> str:
     repo.save_table("gtfs_feeds", feeds)
     return "\n".join(
         f"{r.feed}: {r.n_routes} routes, {r.n_stops} stops, {r.n_trips} trips, "
-        f"service {r.service_start}–{r.service_end}"
+        f"service {r.service_start}-{r.service_end}"
         for r in feeds.itertuples()
     )
 
