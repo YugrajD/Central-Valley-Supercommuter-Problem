@@ -15,7 +15,8 @@ app = FastAPI(
 # Frontend dev server runs on a different origin.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    # 3000 is occupied by a local Postgres service on this machine; dev web runs on 3001
+    allow_origins=["http://localhost:3000", "http://localhost:3001"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -24,3 +25,8 @@ app.add_middleware(
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok", "service": "altamont-api"}
+
+
+from api.routes.baseline import router as baseline_router  # noqa: E402
+
+app.include_router(baseline_router)
