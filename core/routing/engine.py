@@ -64,6 +64,9 @@ def travel_time_matrix(
         departure_time_window=dt.timedelta(minutes=60),  # spread over the AM peak
         transport_modes=[TransportMode.TRANSIT],
         access_modes=[TransportMode.WALK, TransportMode.CAR_PARK],
+        # cap the drive-to-station leg: nobody park-and-rides after an hour+
+        # behind the wheel, and an uncapped car search dominates compute time
+        max_time_driving=dt.timedelta(minutes=45),
         max_time=dt.timedelta(minutes=max_time_min),
     )
     return pd.DataFrame(ttm).rename(columns={"from_id": "from_id", "to_id": "to_id"})
